@@ -8,9 +8,11 @@
 
 #include <avr/io.h>
 
+#ifndef KEYPAD_CUSTOM_PORT
 #define KEYPAD_DDR DDRK
 #define KEYPAD_PORT PORTK
 #define KEYPAD_PIN PINK
+#endif
 
 void init_keypad() {
   KEYPAD_DDR = 0xf0;
