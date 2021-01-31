@@ -3,10 +3,12 @@
  *
  * Author:           Ole Martin Ruud
  * Created:          01/20/21
- * Description:      Functions to interact with multi-segment display.
+ * Description:      Functions to interact with multi-segment display. NB! Uses
+ *                   TIMER5 as internal interrupts to draw to display.
  *****************************************************************************/
 
-// NB! Uses TIMER5 as internal interrupts to draw to display.
+#ifndef AVRO_SEGMENT_H
+#define AVRO_SEGMENT_H
 
 #include <avr/interrupt.h>
 #include <avr/io.h>
@@ -25,8 +27,21 @@
 #define SEGMENT_DIGIT_PIN PINC
 #endif
 
+#ifndef SEGMENT_REFRESH_RATE
 #define SEGMENT_REFRESH_RATE 50
+#endif
+#ifndef SEGMENT_NUM_CHARS
 #define SEGMENT_NUM_CHARS 4
+#endif
+
+
+// PUBLIC
+
+void init_segment();
+void segment_clear();
+void segment_write_char(char c);
+
+// PRIVATE
 
 // 0b10000000 = top
 // 0b01000000 = right top
@@ -162,6 +177,7 @@ ISR(TIMER5_COMPB_vect) {
 
 ISR(TIMER5_COMPC_vect) {
   _disable_digit(_current_digit);
+  // This clears the digit bus to prevent digits bleeding into each other.
   _show_char(' ');
 
   if (0 <= _current_digit && _current_digit < SEGMENT_NUM_CHARS - 1)
@@ -169,3 +185,5 @@ ISR(TIMER5_COMPC_vect) {
   else
     _current_digit = 0;
 }
+
+#endif /* ifndef AVRO_SEGMENT_H */

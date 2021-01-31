@@ -6,6 +6,9 @@
  * Description:      Functions to interact with 4x4 keypad.
  *****************************************************************************/
 
+#ifndef AVRO_KEYPAD_H
+#define AVRO_KEYPAD_H
+
 #include <avr/io.h>
 
 #ifndef KEYPAD_CUSTOM_PORT
@@ -13,6 +16,23 @@
 #define KEYPAD_PORT PORTK
 #define KEYPAD_PIN PINK
 #endif
+
+// PUBLIC
+
+void init_keypad();
+uint16_t read_keypad();
+char get_first_symbol(uint16_t mask);
+
+// PRIVATE
+
+// clang-format off
+const char KEYPAD_ENCODINGS[] = {
+    '1', '4', '7', '*',
+    '2', '5', '8', '0',
+    '3', '6', '9', '#',
+    'a', 'b', 'c', 'd',
+};
+// clang-format on
 
 void init_keypad() {
   KEYPAD_DDR = 0xf0;
@@ -35,20 +55,14 @@ uint16_t read_keypad() {
   return mask;
 }
 
-// clang-format off
-char keypad_encodings[] = {
-    '1', '4', '7', '*',
-    '2', '5', '8', '0',
-    '3', '6', '9', '#',
-    'a', 'b', 'c', 'd',
-};
-// clang-format on
 
 char get_first_symbol(uint16_t mask) {
   for (uint8_t i = 0; i < 16; ++i) {
     if ((mask & (1 << i)) != 0) {
-      return keypad_encodings[i];
+      return KEYPAD_ENCODINGS[i];
     }
   }
   return ' ';
 }
+
+#endif /* ifndef AVRO_KEYPAD_H */
