@@ -35,7 +35,7 @@ void init_rotary() {
   EIMSK |= (1 << INT2);
 }
 
-int8_t read() {
+int8_t rotary_read() {
   int8_t tmp = offset;
   offset = 0;
   return tmp;
