@@ -66,7 +66,7 @@ int8_t rotary_read_offset() {
 bool rotary_read_pressed() {
   bool tmp = _pressed;
   _pressed = false;
-  return _pressed;
+  return tmp;
 }
 
 ISR(INT4_vect) { _pressed = true; }
