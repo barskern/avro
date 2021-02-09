@@ -3,7 +3,8 @@
  *
  * Author:           Ole Martin Ruud
  * Created:          02/07/21
- * Description:      A simple interface to control a stepper motor.
+ * Description:      A simple interface to control a stepper motor. NB! Uses
+ *                   TIMER4 when sending move commands.
  *****************************************************************************/
 
 #ifndef AVRO_STEPPER_H
@@ -24,26 +25,26 @@
 // PUBLIC
 
 void init_stepper();
-void stepper_cw();
-void stepper_ccw();
+void stepper_step_cw();
+void stepper_step_ccw();
 
 void stepper_move(int32_t steps);
 
 // PRIVATE
 
-const uint8_t _states[] = {
+const uint8_t _stepper_states[] = {
     0b0011,
     0b0110,
     0b1100,
     0b1001,
 };
 
-volatile int32_t _offset = 0;
-uint8_t _index = 0;
+volatile int32_t _stepper_offset = 0;
+uint8_t _stepper_index = 0;
 
 void init_stepper() {
   STEPPER_DDR |= 0x0f;
-  STEPPER_PORT = _states[_index];
+  STEPPER_PORT = _stepper_states[_stepper_index];
 
   // Setup interval (2 ms)
   OCR4A = F_CPU / 500;
@@ -56,29 +57,29 @@ void init_stepper() {
 }
 
 void stepper_move(int32_t steps) {
-  _offset = steps;
+  _stepper_offset += steps;
 
   // Start counter with clock (no prescaler)
   TCCR4B |= (1 << CS40);
 }
 
-void stepper_ccw() {
-  _index = (_index + 1) % sizeof(_states);
-  STEPPER_PORT = _states[_index];
+void stepper_step_ccw() {
+  _stepper_index = (_stepper_index + 1) % sizeof(_stepper_states);
+  STEPPER_PORT = _stepper_states[_stepper_index];
 }
 
-void stepper_cw() {
-  _index = (_index - 1) % sizeof(_states);
-  STEPPER_PORT = _states[_index];
+void stepper_step_cw() {
+  _stepper_index = (_stepper_index - 1) % sizeof(_stepper_states);
+  STEPPER_PORT = _stepper_states[_stepper_index];
 }
 
 ISR(TIMER4_COMPA_vect) {
-  if (_offset < 0) {
-    stepper_ccw();
-    _offset++;
-  } else if (_offset > 0) {
-    stepper_cw();
-    _offset--;
+  if (_stepper_offset < 0) {
+    stepper_step_ccw();
+    _stepper_offset++;
+  } else if (_stepper_offset > 0) {
+    stepper_step_cw();
+    _stepper_offset--;
   } else {
     TCCR4B &= ~(1 << CS40);
   }

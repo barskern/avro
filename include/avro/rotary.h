@@ -39,8 +39,8 @@ bool rotary_read_pressed();
 
 // PRIVATE
 
-volatile int8_t _offset;
-volatile bool _pressed;
+volatile int8_t _rotary_offset;
+volatile bool _rotary_pressed;
 
 void init_rotary() {
   // Ensure rotary pins are inputs
@@ -58,18 +58,18 @@ void init_rotary() {
 }
 
 int8_t rotary_read_offset() {
-  int8_t tmp = _offset;
-  _offset = 0;
+  int8_t tmp = _rotary_offset;
+  _rotary_offset = 0;
   return tmp;
 }
 
 bool rotary_read_pressed() {
-  bool tmp = _pressed;
-  _pressed = false;
+  bool tmp = _rotary_pressed;
+  _rotary_pressed = false;
   return tmp;
 }
 
-ISR(INT4_vect) { _pressed = true; }
+ISR(INT4_vect) { _rotary_pressed = true; }
 
 ISR(INT2_vect) {
   // TODO debounce this more effectivly with a simple state machine.
@@ -79,12 +79,12 @@ ISR(INT2_vect) {
 
   if (a != b) {
     // CW
-    if (_offset < INT8_MAX)
-      _offset++;
+    if (_rotary_offset < INT8_MAX)
+      _rotary_offset++;
   } else {
     // CCW
-    if (_offset > INT8_MIN)
-      _offset--;
+    if (_rotary_offset > INT8_MIN)
+      _rotary_offset--;
   }
 }
 

@@ -3,7 +3,8 @@
  *
  * Author:           Ole Martin Ruud
  * Created:          02/07/21
- * Description:      A simple interface to communicate across TWI.
+ * Description:      A simple interface to communicate across TWI with both a
+ *                   blocking and asynchronous interface.
  *****************************************************************************/
 
 #ifndef AVRO_TWI_H
@@ -63,14 +64,14 @@ typedef enum {
   SENT_WRITE_DATA,
 } twi_internal_state_t;
 
-volatile twi_internal_state_t _state = IDLE;
-volatile uint8_t _addr;
-volatile uint8_t _buf_index;
-volatile uint8_t *_buf;
-volatile uint8_t _buf_len;
+volatile twi_internal_state_t _twi_state = IDLE;
+volatile uint8_t _twi_addr;
+volatile uint8_t _twi_buf_index;
+volatile uint8_t *_twi_buf;
+volatile uint8_t _twi_buf_len;
 
 twi_status_t twi_status() {
-  switch (_state) {
+  switch (_twi_state) {
   case IDLE:
     return READY;
   case SENT_START:
@@ -100,11 +101,11 @@ void twi_transfer_blocking(uint8_t addr, uint8_t *buf, uint8_t len) {
   // Clear global interrupts while disabling TWI interrupts to ensure no funky
   // business happens.
   cli();
-  while (_state != IDLE)
+  while (_twi_state != IDLE)
     ;
   // Set into busy blocking state and disable interrupts for TWI
   // TWCR &= ~(1 << TWIE);
-  _state = BUSY_BLOCKING;
+  _twi_state = BUSY_BLOCKING;
   sei();
 
   TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWSTA);
@@ -138,7 +139,6 @@ void twi_transfer_blocking(uint8_t addr, uint8_t *buf, uint8_t len) {
 
       buf[i] = TWDR;
     }
-    TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWSTO);
   } else {
     if (TW_STATUS != TW_MT_SLA_ACK) {
       // TODO handle error!
@@ -157,11 +157,11 @@ void twi_transfer_blocking(uint8_t addr, uint8_t *buf, uint8_t len) {
         goto cleanup;
       }
     }
-    TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWSTO);
   }
+  TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWSTO);
 
 cleanup:
-  _state = IDLE;
+  _twi_state = IDLE;
   // TWCR |= (1 << TWIE);
 }
 
@@ -176,46 +176,46 @@ void twi_read(uint8_t addr, uint8_t *value) {
 
 void twi_transfer(uint8_t addr, uint8_t *buf, uint8_t len) {
   assert(len > 0);
-  assert(_state != BUSY_BLOCKING);
+  assert(_twi_state != BUSY_BLOCKING);
 
-  _buf_index = 0;
-  _buf = buf;
-  _buf_len = len;
-  _addr = addr;
+  _twi_buf_index = 0;
+  _twi_buf = buf;
+  _twi_buf_len = len;
+  _twi_addr = addr;
   TWCR = (1 << TWINT) + (1 << TWEN) + (1 << TWSTA);
-  _state = SENT_START;
+  _twi_state = SENT_START;
 }
 
 ISR(TWI_vect) {
-  switch (_state) {
+  switch (_twi_state) {
   case SENT_START:
     if (TW_STATUS == TW_START) {
-      TWDR = _addr;
+      TWDR = _twi_addr;
       TWCR = (1 << TWINT) | (1 << TWEN);
-      _state = _addr & TW_READ ? SENT_READ_ADDR : SENT_WRITE_ADDR;
+      _twi_state = _twi_addr & TW_READ ? SENT_READ_ADDR : SENT_WRITE_ADDR;
     } else {
       // TODO handle error!
     }
     break;
   case SENT_WRITE_ADDR:
     if (TW_STATUS == TW_MT_SLA_ACK) {
-      TWDR = _buf[_buf_index++];
+      TWDR = _twi_buf[_twi_buf_index++];
       TWCR = (1 << TWINT) | (1 << TWEN);
-      _state = SENT_WRITE_DATA;
+      _twi_state = SENT_WRITE_DATA;
     } else {
       // TODO handle error!
     }
     break;
   case SENT_WRITE_DATA:
     if (TW_STATUS == TW_MT_DATA_ACK) {
-      if (_buf_index < _buf_len) {
-        TWDR = _buf[_buf_index++];
+      if (_twi_buf_index < _twi_buf_len) {
+        TWDR = _twi_buf[_twi_buf_index++];
         TWCR = (1 << TWINT) | (1 << TWEN);
-        _state = SENT_WRITE_DATA;
+        _twi_state = SENT_WRITE_DATA;
       } else {
         // Entire buffer was sent, send stop condition
         TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWSTO);
-        _state = IDLE;
+        _twi_state = IDLE;
       }
     } else {
       // TODO handle error!
@@ -224,21 +224,21 @@ ISR(TWI_vect) {
   case SENT_READ_ADDR:
     if (TW_STATUS == TW_MR_SLA_ACK) {
       TWCR = (1 << TWINT) | (1 << TWEN);
-      _state = SENT_READ_DATA;
+      _twi_state = SENT_READ_DATA;
     } else {
       // TODO handle error!
     }
     break;
   case SENT_READ_DATA:
     if (TW_STATUS == TW_MR_DATA_ACK) {
-      if (_buf_index < _buf_len) {
-        _buf[_buf_index++] = TWDR;
+      if (_twi_buf_index < _twi_buf_len) {
+        _twi_buf[_twi_buf_index++] = TWDR;
         TWCR = (1 << TWINT) | (1 << TWEN);
-        _state = SENT_READ_DATA;
+        _twi_state = SENT_READ_DATA;
       } else {
         // Entire buffer was filled with data, send stop condition
         TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWSTO);
-        _state = IDLE;
+        _twi_state = IDLE;
       }
     } else {
       // TODO handle error!

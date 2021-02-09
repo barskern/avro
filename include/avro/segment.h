@@ -77,27 +77,27 @@ const uint8_t SEGMENT_ENCODINGS_LETTERS[] = {
 // hence CANNOT be written too. Further the main execution owns the
 // write-pointer (wdata) and can write to it, BUT it should never be read in an
 // interrupt.
-char _left[SEGMENT_NUM_CHARS] = {0};
-char _right[SEGMENT_NUM_CHARS] = {0};
+char _segment_buf_left[SEGMENT_NUM_CHARS] = {0};
+char _segment_buf_right[SEGMENT_NUM_CHARS] = {0};
 
-volatile char *_wdata = _left;
-volatile char *_rdata = _right;
+volatile char *_segment_wdata = _segment_buf_left;
+volatile char *_segment_rdata = _segment_buf_right;
 
 void _swap_data_ptrs() {
   // Swap the pointers atomically so that the read-pointer points to the
   // newly filled data, while the write-pointer will point to the outdated
   // (old) data.
   ATOMIC_BLOCK(ATOMIC_FORCEON) {
-    volatile char *tmp = _wdata;
-    _wdata = _rdata;
-    _rdata = tmp;
+    volatile char *tmp = _segment_wdata;
+    _segment_wdata = _segment_rdata;
+    _segment_rdata = tmp;
   }
 
   // After the previous swap, wdata now contains the old data. As anyone can
   // read from the read-pointer, we copy over every character so that wdata has
   // the latest changes from the previous write cycle.
   for (uint8_t i = 0; i < SEGMENT_NUM_CHARS; ++i) {
-    _wdata[i] = _rdata[i];
+    _segment_wdata[i] = _segment_rdata[i];
   }
 }
 
@@ -126,15 +126,15 @@ void init_segment() {
 void segment_clear() {
   // Set all data to empty
   for (uint8_t i = 0; i < SEGMENT_NUM_CHARS; ++i)
-    _wdata[i] = 0;
+    _segment_wdata[i] = 0;
   _swap_data_ptrs();
 }
 
 void segment_write_char(char c) {
   // Shift data to the left and add new symbol at the end
   for (uint8_t i = 0; i < SEGMENT_NUM_CHARS - 1; ++i)
-    _wdata[i] = _wdata[i + 1];
-  _wdata[SEGMENT_NUM_CHARS - 1] = c;
+    _segment_wdata[i] = _segment_wdata[i + 1];
+  _segment_wdata[SEGMENT_NUM_CHARS - 1] = c;
   _swap_data_ptrs();
 }
 
@@ -168,22 +168,22 @@ void _show_data(char data[4]) {
   }
 }
 
-volatile uint8_t _current_digit = 0;
+volatile uint8_t _segment_current_digit = 0;
 
 ISR(TIMER5_COMPB_vect) {
-  _enable_digit(_current_digit);
-  _show_char(_rdata[SEGMENT_NUM_CHARS - 1 - _current_digit]);
+  _enable_digit(_segment_current_digit);
+  _show_char(_segment_rdata[SEGMENT_NUM_CHARS - 1 - _segment_current_digit]);
 }
 
 ISR(TIMER5_COMPC_vect) {
-  _disable_digit(_current_digit);
+  _disable_digit(_segment_current_digit);
   // This clears the digit bus to prevent digits bleeding into each other.
   _show_char(' ');
 
-  if (0 <= _current_digit && _current_digit < SEGMENT_NUM_CHARS - 1)
-    _current_digit++;
+  if (0 <= _segment_current_digit && _segment_current_digit < SEGMENT_NUM_CHARS - 1)
+    _segment_current_digit++;
   else
-    _current_digit = 0;
+    _segment_current_digit = 0;
 }
 
 #endif /* ifndef AVRO_SEGMENT_H */
