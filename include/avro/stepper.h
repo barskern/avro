@@ -28,6 +28,7 @@ void init_stepper();
 void stepper_step_cw();
 void stepper_step_ccw();
 
+void stepper_set_target(int32_t target);
 void stepper_move(int32_t steps);
 bool stepper_done();
 void stepper_stop();
@@ -59,6 +60,12 @@ void init_stepper() {
 }
 
 void stepper_stop() { _stepper_offset = 0; }
+
+void stepper_set_target(int32_t target) {
+  _stepper_offset = target;
+
+  TCCR4B |= (1 << CS40);
+}
 
 void stepper_move(int32_t steps) {
   _stepper_offset += steps;
