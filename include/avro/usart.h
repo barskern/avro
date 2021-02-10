@@ -13,14 +13,15 @@
 #include <avr/interrupt.h>
 #include <avr/io.h>
 
+#include <avr/sleep.h>
 #include <stdbool.h>
 #include <string.h>
 #include <util/delay.h>
 
 #include "circular_buffer.h"
 
-#define TX_BUFFER_SIZE 10
-#define RX_BUFFER_SIZE 10
+#define TX_BUFFER_SIZE 32
+#define RX_BUFFER_SIZE 32
 
 // PUBLIC
 
@@ -34,7 +35,10 @@ void usart_send_byte_blocking(uint8_t byte);
 void usart_send_bytes_blocking(const uint8_t *buf, uint8_t len);
 void usart_send_string_blocking(const char *string);
 
-uint8_t usart_recv_into(uint8_t *buf, uint8_t max_len);
+void usart_recv_drop_until_blocking(const char *needle, uint8_t *recv_buf,
+                                    uint8_t len);
+uint8_t usart_recv_take_until_blocking(const char *needle, uint8_t *recv_buf,
+                                       uint8_t len);
 
 // PRIVATE
 
@@ -69,60 +73,124 @@ void init_usart() {
   UBRR0L = 12;
 }
 
-void _clear_usart_interrupts() { UCSR0B &= ~(1 << UDRIE0) & ~(1 << RXCIE0); }
-void _enable_usart_interrupts() { UCSR0B |= (1 << UDRIE0) | (1 << RXCIE0); }
+void usart_recv_drop_until_blocking(const char *needle, uint8_t *recv_buf,
+                                    uint8_t len) {
+  uint8_t needle_len = strlen(needle);
+  uint8_t *needle_start;
+  uint8_t total_recv_bytes = 0;
 
-uint8_t usart_recv_into(uint8_t *buf, uint8_t max_len) {
-  _clear_usart_interrupts();
-  uint8_t n = circular_buffer_read(buf, max_len, &_usart_recv_buffer);
-  _enable_usart_interrupts();
-  return n;
+  while (1) {
+    // We are always dropping prior data, so we can advance while we read.
+    uint8_t recv_bytes =
+        circular_buffer_read(recv_buf + total_recv_bytes,
+                             len - 1 - total_recv_bytes, &_usart_recv_buffer);
+    total_recv_bytes += recv_bytes;
+
+    recv_buf[total_recv_bytes] = '\0';
+    needle_start = (uint8_t *)strstr((char *)recv_buf, needle);
+    if (needle_start) {
+      // Only advance the difference between the previous position and the
+      // start of the needle, this keeps everything after the needle in the
+      // recv buffer.
+      circular_buffer_advance((needle_start - recv_buf) -
+                                  (total_recv_bytes - recv_bytes),
+                              &_usart_recv_buffer);
+      return;
+    } else {
+      circular_buffer_advance(recv_bytes, &_usart_recv_buffer);
+    }
+
+    // If we filled the buffer, move the last values to the front, and start
+    // reading to the middle of the buffer. This ensures that a calibrate
+    // command is not dropped if it arrvives in the middle of a buffer move.
+    if (total_recv_bytes >= len - 1) {
+      total_recv_bytes = needle_len;
+      memmove(recv_buf, recv_buf + len - 1 - total_recv_bytes,
+              total_recv_bytes);
+    }
+
+    // Only sleep if we recveived zero bytes, as then we have to wait for the
+    // next RX interrupt.
+    if (recv_bytes == 0)
+      sleep_mode();
+  }
+}
+
+uint8_t usart_recv_take_until_blocking(const char *needle, uint8_t *recv_buf,
+                                       uint8_t len) {
+  uint8_t needle_len = strlen(needle);
+  uint8_t *needle_start;
+  uint8_t total_recv_bytes = 0;
+
+  while (1) {
+    // We want to keep data in recv buffer that is after what we take to
+    // simplify interface.
+    uint8_t recv_bytes =
+        circular_buffer_read(recv_buf + total_recv_bytes,
+                             len - 1 - total_recv_bytes, &_usart_recv_buffer);
+    total_recv_bytes += recv_bytes;
+
+    recv_buf[total_recv_bytes] = '\0';
+    needle_start = (uint8_t *)strstr((char *)recv_buf, needle);
+    if (needle_start) {
+      // We found what we were searching for, so advance recv buffer to
+      // the end of the needle to consume the data, then return the amount of
+      // bytes read (excluding the needle).
+
+      // Only advance the difference between the previous position and the
+      // end of the needle, this keeps everything after the needle in the
+      // recv buffer.
+      circular_buffer_advance((needle_start - recv_buf) -
+                                  (total_recv_bytes - recv_bytes) + needle_len,
+                              &_usart_recv_buffer);
+      return needle_start - recv_buf;
+    } else {
+      circular_buffer_advance(recv_bytes, &_usart_recv_buffer);
+    }
+
+    // If we filled the buffer, sooo this is an error and there isn't much to
+    // do. Simply return what we have read so far.
+    // TODO should be handled more gracefully.
+    if (total_recv_bytes >= len - 1) {
+      return total_recv_bytes;
+    }
+
+    // Only sleep if we recveived zero bytes, as then we have to wait for the
+    // next RX interrupt.
+    if (recv_bytes == 0)
+      sleep_mode();
+  }
 }
 
 void usart_send_byte(uint8_t byte) {
-  _clear_usart_interrupts();
   if (_usart_is_sending) {
-    uint8_t tmp[] = {byte};
     circular_buffer_status_t status =
-        circular_buffer_write(&_usart_send_buffer, tmp, sizeof(tmp));
+        circular_buffer_write(&_usart_send_buffer, &byte, 1);
     if (status != CIRCULAR_BUFFER_OK) {
       // TODO handle error!
     }
+    // Say we are sending and ensure empty data registry interrupt is set
+    _usart_is_sending = true;
+    UCSR0B |= (1 << UDRIE0);
   } else {
     // Should not block due to _usart_is_sending is false (which means a
     // interrupt the the buffer is empty has already come)
     usart_send_byte_blocking(byte);
   }
-  _enable_usart_interrupts();
 }
 void usart_send_bytes(const uint8_t *buf, uint8_t len) {
-  _clear_usart_interrupts();
-  if (_usart_is_sending) {
-    // We are already sending, so we can just append to the send buffer, and
-    // it will be sent automatically when the UDR0 is ready.
-    //
-    circular_buffer_status_t status =
-        circular_buffer_write(&_usart_send_buffer, buf, len);
-    if (status != CIRCULAR_BUFFER_OK) {
-      // TODO handle error!
-    }
-
-  } else {
-    // Write the data to the send buffer, and then start sending by activating
-    // the interrupt on empty data registry.
-
-    circular_buffer_status_t status =
-        circular_buffer_write(&_usart_send_buffer, buf, len);
-    if (status != CIRCULAR_BUFFER_OK) {
-      // TODO handle error!
-    }
-
-    // Enable empty data registry interrupt to start sending, and say that we
-    // are currently sending
-    _usart_is_sending = true;
-    UCSR0B |= (1 << UDRIE0);
+  // We simply append the data to the send buffer, and ensure that we are
+  // sending when we are ready.
+  circular_buffer_status_t status =
+      circular_buffer_write(&_usart_send_buffer, buf, len);
+  if (status != CIRCULAR_BUFFER_OK) {
+    // TODO handle error!
   }
-  _enable_usart_interrupts();
+
+  // Enable empty data registry interrupt to start sending, and say that we
+  // are currently sending.
+  _usart_is_sending = true;
+  UCSR0B |= (1 << UDRIE0);
 }
 
 void usart_send_string(const char *str) {
@@ -138,6 +206,7 @@ void usart_send_byte_blocking(uint8_t byte) {
   // Wait for Tx Buffer to become empty (check UDRE flag)
   while (!(UCSR0A & (1 << UDRE0)))
     ;
+
   UDR0 = byte;
 }
 
@@ -164,10 +233,10 @@ ISR(USART0_RX_vect) {
 
 ISR(USART0_UDRE_vect) {
   // Data registry empty and ready to send new byte
-  uint8_t tmp[1];
-  uint8_t n = circular_buffer_read(tmp, sizeof(tmp), &_usart_send_buffer);
-  if (n > 0) {
-    UDR0 = tmp[0];
+  uint8_t data;
+  uint8_t n = circular_buffer_read_and_advance(&data, 1, &_usart_send_buffer);
+  if (n == 1) {
+    UDR0 = data;
     _usart_is_sending = true;
     UCSR0B |= (1 << UDRIE0);
   } else {

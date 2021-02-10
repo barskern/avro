@@ -29,6 +29,8 @@ void stepper_step_cw();
 void stepper_step_ccw();
 
 void stepper_move(int32_t steps);
+bool stepper_done();
+void stepper_stop();
 
 // PRIVATE
 
@@ -56,6 +58,8 @@ void init_stepper() {
   TIMSK4 |= (1 << OCIE4A);
 }
 
+void stepper_stop() { _stepper_offset = 0; }
+
 void stepper_move(int32_t steps) {
   _stepper_offset += steps;
 
@@ -72,6 +76,8 @@ void stepper_step_cw() {
   _stepper_index = (_stepper_index - 1) % sizeof(_stepper_states);
   STEPPER_PORT = _stepper_states[_stepper_index];
 }
+
+bool stepper_done() { return _stepper_offset == 0; }
 
 ISR(TIMER4_COMPA_vect) {
   if (_stepper_offset < 0) {

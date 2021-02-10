@@ -11,6 +11,7 @@
 #define AVRO_CIRCULAR_BUFFER_H
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -35,27 +36,39 @@ typedef enum {
 
 circular_buffer_status_t circular_buffer_write(circular_buffer_t *buf,
                                                const uint8_t *src, uint8_t len);
+uint8_t circular_buffer_len(circular_buffer_t *buf);
+void circular_buffer_advance(uint8_t amount, circular_buffer_t *buf);
 uint8_t circular_buffer_read(uint8_t *dest, uint8_t max_len,
                              circular_buffer_t *buf);
-uint8_t circular_buffer_len(circular_buffer_t *buf);
+uint8_t circular_buffer_read_and_advance(uint8_t *dest, uint8_t max_len,
+                                         circular_buffer_t *buf);
 
 // PRIVATE
 
+uint8_t _circular_buffer_read(uint8_t *dest, uint8_t max_len,
+                              circular_buffer_t *buf, bool advance);
+
 uint8_t circular_buffer_len(circular_buffer_t *buf) {
-  if (buf->start <= buf->end) {
-    return buf->end - buf->start;
+  uint8_t bstart = buf->start;
+  uint8_t bend = buf->end;
+
+  if (bstart <= bend) {
+    return bend - bstart;
   } else {
-    return (buf->len - buf->start) + buf->end;
+    return (buf->len - bstart) + bend;
   }
 }
 
 circular_buffer_status_t
 circular_buffer_write(circular_buffer_t *buf, const uint8_t *src, uint8_t len) {
-  if (buf->start <= buf->end) {
+  uint8_t bstart = buf->start;
+  uint8_t bend = buf->end;
+
+  if (bstart <= bend) {
     // Buffer only has continuos data, so we can insert after end and possibly
     // before start.
-    uint8_t avaliable_continous_back = buf->len - buf->end;
-    uint8_t avaliable_continous_front = buf->start;
+    uint8_t avaliable_continous_back = buf->len - bend;
+    uint8_t avaliable_continous_front = bstart;
     if (avaliable_continous_back + avaliable_continous_front < len) {
       // The data cannot fit, so we insert none of it
       return CIRCULAR_BUFFER_FULL;
@@ -63,75 +76,130 @@ circular_buffer_write(circular_buffer_t *buf, const uint8_t *src, uint8_t len) {
 
     if (len <= avaliable_continous_back) {
       // The data can fit continuosly at the end of the buffer
-      memcpy(buf->buf + buf->end, src, len * sizeof(uint8_t));
-      buf->end += len;
+      memcpy(buf->buf + bend, src, len * sizeof(uint8_t));
+      bend += len;
 
-      assert(buf->end <= buf->len);
+      assert(bend <= buf->len);
     } else {
       // We have space, but we have to split the data across the buffer boundary
       assert(avaliable_continous_back < len);
 
-      memcpy(buf->buf + buf->end, src,
-             avaliable_continous_back * sizeof(uint8_t));
-      buf->end += avaliable_continous_back;
-      assert(buf->end == buf->len);
+      memcpy(buf->buf + bend, src, avaliable_continous_back * sizeof(uint8_t));
+      bend += avaliable_continous_back;
+      assert(bend == buf->len);
 
       memcpy(buf->buf, src + avaliable_continous_back,
              (len - avaliable_continous_back) * sizeof(uint8_t));
-      buf->end = len - avaliable_continous_back;
-      assert(buf->end <= buf->start);
+      bend = len - avaliable_continous_back;
+      assert(bend <= bstart);
     }
   } else {
     // Buffer already has non-continuos data, so we have to insert data between
-    // buf->end and buf->start.
-    uint8_t avaliable_continous = buf->start - buf->end;
+    // bend and bstart.
+    uint8_t avaliable_continous = bstart - bend;
     if (avaliable_continous < len) {
       // The data cannot fit, so we insert none of it
       return CIRCULAR_BUFFER_FULL;
     }
 
-    // The data can fit continuosly between buf->end and buf->start
-    memcpy(buf->buf + buf->end, src, len * sizeof(uint8_t));
-    buf->end += len;
-
-    assert(buf->end <= buf->start);
+    // The data can fit continuosly between bend and bstart
+    memcpy(buf->buf + bend, src, len * sizeof(uint8_t));
+    bend += len;
+    assert(bend <= bstart);
   }
+
+  // NB! We have to ensure to update the actual end of the buffer.
+  buf->end = bend;
 
   return CIRCULAR_BUFFER_OK;
 }
 
-uint8_t circular_buffer_read(uint8_t *dest, uint8_t max_len,
-                             circular_buffer_t *buf) {
-  if (buf->start == buf->end) {
-    return 0;
-  } else if (buf->start < buf->end) {
-    // Buffer has only continuos data, so reading is simply between buf->start
-    // and buf->end, and then move buf->start by the amount read.
+void circular_buffer_advance(uint8_t amount, circular_buffer_t *buf) {
+  // By reading these values first, we can safely interrupt this function and
+  // append to the end without it "breaking" the datastructure. This is
+  // because buf->end is ONLY increased.
+  uint8_t bstart = buf->start;
+  uint8_t bend = buf->end;
 
-    uint8_t read_len =
-        buf->end - buf->start < max_len ? buf->end - buf->start : max_len;
-    memcpy(dest, buf->buf + buf->start, read_len);
-    buf->start += read_len;
+  // Saturate amount to max size of buffer, so if amount is greater than
+  // amount of data in buffer, we simply "eat" all data, leaving the buffer
+  // empty.
+  if (bstart <= bend) {
+    amount = amount <= bend - bstart ? amount : bend - bstart;
+    buf->start = bstart + amount;
+
+  } else {
+    amount =
+        amount <= buf->len - bstart + bend ? amount : buf->len - bstart + bend;
+
+    buf->start = (bstart + amount) % buf->len;
+  }
+}
+
+uint8_t _circular_buffer_read(uint8_t *dest, uint8_t max_len,
+                              circular_buffer_t *buf, bool advance) {
+
+  // By reading these values first, we can safely interrupt this function and
+  // append to the end without it "breaking" the datastructure. This is
+  // because writing ONLY changes buf->end, and reading only changes
+  // buf->start.
+  uint8_t bstart = buf->start;
+  uint8_t bend = buf->end;
+
+  if (bstart == bend) {
+    return 0;
+  } else if (bstart < bend) {
+    // Buffer has only continuos data, so reading is simply between bstart
+    // and bend, and then move bstart by the amount read.
+
+    uint8_t read_len = bend - bstart < max_len ? bend - bstart : max_len;
+    memcpy(dest, buf->buf + bstart, read_len);
+
+    if (advance) {
+      bstart += read_len;
+      assert(bstart <= bend);
+
+      // NB! We have to remember to update the actual buffer start before
+      // exiting. This is an "atomic" operation and will enable the write
+      // routine to write to more of the buffer.
+      buf->start = bstart;
+    }
 
     return read_len;
   } else {
     // Buffer has non-continuos data, so we first have to read from the
-    // buf->start to buf->len, and then from buf-buf to buf->end.
+    // bstart to buf->len, and then from buf-buf to bend.
 
     uint8_t read_len_back =
-        buf->len - buf->start < max_len ? buf->len - buf->start : max_len;
-
-    memcpy(dest, buf->buf + buf->start, read_len_back);
-    // Use modulo to make buf->start zero if we read to the end of the buffer.
-    buf->start = (buf->start + read_len_back) % buf->len;
+        buf->len - bstart < max_len ? buf->len - bstart : max_len;
+    memcpy(dest, buf->buf + bstart, read_len_back);
 
     uint8_t read_len_front =
-        buf->end < max_len - read_len_back ? buf->end : max_len - read_len_back;
+        bend < max_len - read_len_back ? bend : max_len - read_len_back;
     memcpy(dest + read_len_back, buf->buf, read_len_front);
-    buf->start = (buf->start + read_len_front) % buf->len;
+
+    if (advance) {
+      // Use modulo to make bstart zero if we read to the end of the buffer.
+      bstart = (bstart + read_len_back + read_len_front) % buf->len;
+
+      // NB! We have to remember to update the actual buffer start before
+      // exiting. This is an "atomic" operation and will enable the write
+      // routine to write to more of the buffer.
+      buf->start = bstart;
+    }
 
     return read_len_back + read_len_front;
   }
+}
+
+uint8_t circular_buffer_read(uint8_t *dest, uint8_t max_len,
+                             circular_buffer_t *buf) {
+  return _circular_buffer_read(dest, max_len, buf, false);
+}
+
+uint8_t circular_buffer_read_and_advance(uint8_t *dest, uint8_t max_len,
+                                         circular_buffer_t *buf) {
+  return _circular_buffer_read(dest, max_len, buf, true);
 }
 
 #endif /* ifndef AVRO_CIRCULAR_BUFFER_H */
