@@ -75,7 +75,8 @@ void init_usart() {
 }
 
 uint8_t usart_recv_into(uint8_t *recv_buf, uint8_t max_len) {
-	return circular_buffer_read_and_advance(recv_buf, max_len, &_usart_recv_buffer);
+  return circular_buffer_read_and_advance(recv_buf, max_len,
+                                          &_usart_recv_buffer);
 }
 
 void usart_recv_drop_until_blocking(const char *needle, uint8_t *recv_buf,
@@ -155,7 +156,6 @@ uint8_t usart_recv_take_until_blocking(const char *needle, uint8_t *recv_buf,
 
     // If we filled the buffer, sooo this is an error and there isn't much to
     // do. Simply return what we have read so far.
-    // TODO should be handled more gracefully.
     if (total_recv_bytes >= len - 1) {
       return total_recv_bytes;
     }
@@ -172,7 +172,7 @@ void usart_send_byte(uint8_t byte) {
     circular_buffer_status_t status =
         circular_buffer_write(&_usart_send_buffer, &byte, 1);
     if (status != CIRCULAR_BUFFER_OK) {
-      // TODO handle error!
+		return;
     }
     // Say we are sending and ensure empty data registry interrupt is set
     _usart_is_sending = true;
@@ -189,7 +189,7 @@ void usart_send_bytes(const uint8_t *buf, uint8_t len) {
   circular_buffer_status_t status =
       circular_buffer_write(&_usart_send_buffer, buf, len);
   if (status != CIRCULAR_BUFFER_OK) {
-    // TODO handle error!
+    return;
   }
 
   // Enable empty data registry interrupt to start sending, and say that we
@@ -232,7 +232,7 @@ ISR(USART0_RX_vect) {
   circular_buffer_status_t status =
       circular_buffer_write(&_usart_recv_buffer, &val, 1);
   if (status != CIRCULAR_BUFFER_OK) {
-    // TODO handle error!
+	  return;
   }
 }
 

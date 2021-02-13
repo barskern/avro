@@ -87,32 +87,24 @@ twi_status_t twi_status() {
 }
 
 void twi_send_blocking(uint8_t addr, uint8_t value) {
-  uint8_t buf[] = {value};
-  twi_transfer_blocking((addr << 1) | TW_WRITE, buf, sizeof(buf));
+  twi_transfer_blocking((addr << 1) | TW_WRITE, &value, 1);
 }
 
 uint8_t twi_read_blocking(uint8_t addr) {
-  uint8_t buf[1];
-  twi_transfer_blocking((addr << 1) | TW_READ, buf, sizeof(buf));
-  return buf[0];
+  uint8_t value;
+  twi_transfer_blocking((addr << 1) | TW_READ, &value, 1);
+  return value;
 }
 
 void twi_transfer_blocking(uint8_t addr, uint8_t *buf, uint8_t len) {
-  // Clear global interrupts while disabling TWI interrupts to ensure no funky
-  // business happens.
-  cli();
   while (_twi_state != IDLE)
     ;
-  // Set into busy blocking state and disable interrupts for TWI
-  // TWCR &= ~(1 << TWIE);
   _twi_state = BUSY_BLOCKING;
-  sei();
 
   TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWSTA);
   while (!(TWCR & (1 << TWINT)))
     ;
   if (TW_STATUS != TW_START) {
-    // TODO handle error
     goto cleanup;
   }
 
@@ -123,7 +115,6 @@ void twi_transfer_blocking(uint8_t addr, uint8_t *buf, uint8_t len) {
 
   if (addr & TW_READ) {
     if (TW_STATUS != TW_MR_SLA_ACK) {
-      // TODO handle error!
       goto cleanup;
     }
 
@@ -133,7 +124,6 @@ void twi_transfer_blocking(uint8_t addr, uint8_t *buf, uint8_t len) {
         ;
 
       if (TW_STATUS != TW_MR_DATA_ACK) {
-        // TODO handle error!
         goto cleanup;
       }
 
@@ -141,7 +131,6 @@ void twi_transfer_blocking(uint8_t addr, uint8_t *buf, uint8_t len) {
     }
   } else {
     if (TW_STATUS != TW_MT_SLA_ACK) {
-      // TODO handle error!
       goto cleanup;
     }
 
@@ -153,7 +142,6 @@ void twi_transfer_blocking(uint8_t addr, uint8_t *buf, uint8_t len) {
         ;
 
       if (TW_STATUS != TW_MT_DATA_ACK) {
-        // TODO handle error!
         goto cleanup;
       }
     }
@@ -162,7 +150,6 @@ void twi_transfer_blocking(uint8_t addr, uint8_t *buf, uint8_t len) {
 
 cleanup:
   _twi_state = IDLE;
-  // TWCR |= (1 << TWIE);
 }
 
 void twi_send(uint8_t addr, uint8_t value) {
@@ -194,7 +181,7 @@ ISR(TWI_vect) {
       TWCR = (1 << TWINT) | (1 << TWEN);
       _twi_state = _twi_addr & TW_READ ? SENT_READ_ADDR : SENT_WRITE_ADDR;
     } else {
-      // TODO handle error!
+      _twi_state = IDLE;
     }
     break;
   case SENT_WRITE_ADDR:
@@ -203,7 +190,7 @@ ISR(TWI_vect) {
       TWCR = (1 << TWINT) | (1 << TWEN);
       _twi_state = SENT_WRITE_DATA;
     } else {
-      // TODO handle error!
+      _twi_state = IDLE;
     }
     break;
   case SENT_WRITE_DATA:
@@ -218,7 +205,7 @@ ISR(TWI_vect) {
         _twi_state = IDLE;
       }
     } else {
-      // TODO handle error!
+      _twi_state = IDLE;
     }
     break;
   case SENT_READ_ADDR:
@@ -226,7 +213,7 @@ ISR(TWI_vect) {
       TWCR = (1 << TWINT) | (1 << TWEN);
       _twi_state = SENT_READ_DATA;
     } else {
-      // TODO handle error!
+      _twi_state = IDLE;
     }
     break;
   case SENT_READ_DATA:
@@ -241,7 +228,7 @@ ISR(TWI_vect) {
         _twi_state = IDLE;
       }
     } else {
-      // TODO handle error!
+      _twi_state = IDLE;
     }
     break;
   case BUSY_BLOCKING:

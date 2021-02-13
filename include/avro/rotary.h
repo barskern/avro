@@ -72,7 +72,6 @@ bool rotary_read_pressed() {
 ISR(INT4_vect) { _rotary_pressed = true; }
 
 ISR(INT2_vect) {
-  // TODO debounce this more effectivly with a simple state machine.
   // See https://www.best-microcontroller-projects.com/rotary-encoder.html
   bool a = (ROTARY_PIN & (1 << ROTARY_PIN_A)) != 0;
   bool b = (ROTARY_PIN & (1 << ROTARY_PIN_B)) != 0;
