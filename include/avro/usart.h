@@ -35,6 +35,7 @@ void usart_send_byte_blocking(uint8_t byte);
 void usart_send_bytes_blocking(const uint8_t *buf, uint8_t len);
 void usart_send_string_blocking(const char *string);
 
+uint8_t usart_recv_into(uint8_t *recv_buf, uint8_t max_len);
 void usart_recv_drop_until_blocking(const char *needle, uint8_t *recv_buf,
                                     uint8_t len);
 uint8_t usart_recv_take_until_blocking(const char *needle, uint8_t *recv_buf,
@@ -71,6 +72,10 @@ void init_usart() {
   // 9600 baud, UBRR = 12, and  U2X must be set to '1' in UCSRA
   UBRR0H = 0;
   UBRR0L = 12;
+}
+
+uint8_t usart_recv_into(uint8_t *recv_buf, uint8_t max_len) {
+	return circular_buffer_read_and_advance(recv_buf, max_len, &_usart_recv_buffer);
 }
 
 void usart_recv_drop_until_blocking(const char *needle, uint8_t *recv_buf,
